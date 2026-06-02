@@ -2914,7 +2914,7 @@ async function renderModUsuarios(c){
         <span style="color:#9ca3af;font-weight:400"> · ${p.papel}${ehSuporte()?` · ${p.workspace}`:''}</span>
         ${p.ativo===false?'<span style="color:#dc2626;font-size:11px"> (inativo)</span>':''}</span>
       <span class="dre-val" style="gap:8px">
-        <button class="nav-btn" onclick="editarPerfilCloud('${p.id}','${(p.nome||'').replace(/'/g,'')}','${p.papel}',${p.ativo!==false})">Editar</button>
+        <button class="nav-btn" onclick="editarPerfilCloud('${p.id}')">Editar</button>
         ${p.id!==cloudUser.id?`<button class="nav-btn" style="color:#dc2626" onclick="excluirPerfilCloud('${p.id}')">Excluir</button>`:''}
       </span></div>`).join('')
   c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários com acesso na nuvem') +
@@ -2961,29 +2961,53 @@ async function criarUsuarioCloud(){
   } catch(e){ erro.style.color='#dc2626'; erro.textContent='Erro: '+(e.message||e) }
 }
 
-function editarPerfilCloud(id,nome,papel,ativo){
+async function editarPerfilCloud(id){
+  let p = {}
+  try { const { data } = await sb.from('perfis').select('*').eq('id', id).maybeSingle(); p = data||{} } catch(e){}
+  const papel = p.papel || 'gestor'
+  const perms = p.permissoes || []
   const opc = Object.entries(PERFIS).filter(([k])=>k!=='suporte'||ehSuporte())
     .map(([k,v])=>`<option value="${k}" ${papel===k?'selected':''}>${v.label}</option>`).join('')
+  const checks = MODULES.map(m=>`
+    <label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;color:#374151">
+      <input type="checkbox" class="epperm" value="${m.id}" ${perms.includes(m.id)?'checked':''}>
+      <span style="display:inline-flex;align-items:center;gap:6px">${m.icon}${m.label}</span>
+    </label>`).join('')
   document.getElementById('modalTitle').textContent='Editar Usuário'
   document.getElementById('modalOverlay').classList.remove('hidden')
   document.getElementById('modalBody').innerHTML = `
-    <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="ep_nome" value="${nome}"></div>
-    <div class="form-group"><label class="form-label">Perfil</label><select class="form-input" id="ep_papel">${opc}</select></div>
-    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px"><input type="checkbox" id="ep_ativo" ${ativo?'checked':''}> Usuário ativo</label>
+    <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="ep_nome" value="${(p.nome||'').replace(/"/g,'&quot;')}"></div>
+    <div class="form-group"><label class="form-label">Perfil</label>
+      <select class="form-input" id="ep_papel" onchange="aplicarPermsPerfilCloud()">${opc}</select></div>
+    <div class="form-group">
+      <label class="form-label">Permissões de módulos</label>
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;max-height:220px;overflow:auto">${checks}</div>
+    </div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px"><input type="checkbox" id="ep_ativo" ${p.ativo!==false?'checked':''}> Usuário ativo</label>
     <p style="font-size:12px;color:#9ca3af">Para trocar a senha, o usuário usa "Esqueci minha senha" ou o Suporte redefine.</p>
     <div id="ep_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
-    <button class="btn-primary" style="width:100%" onclick="salvarPerfilCloud('${id}')">Salvar</button>`
+    <button class="btn-primary" style="width:100%" onclick="salvarPerfilCloud('${id}')">Salvar alterações</button>`
+}
+function aplicarPermsPerfilCloud(){
+  const perfil = document.getElementById('ep_papel').value
+  const perms = permsDoPerfil(perfil)
+  document.querySelectorAll('.epperm').forEach(c=>{ c.checked = perms.includes(c.value) })
 }
 async function salvarPerfilCloud(id){
   const nome=document.getElementById('ep_nome').value.trim()
   const papel=document.getElementById('ep_papel').value
   const ativo=document.getElementById('ep_ativo').checked
-  try { await sb.from('perfis').update({ nome, papel, permissoes:permsDoPerfil(papel), ativo }).eq('id', id); closeModal(); showView('usuarios') }
+  const permissoes=[...document.querySelectorAll('.epperm:checked')].map(c=>c.value)
+  try { await sb.from('perfis').update({ nome, papel, permissoes, ativo }).eq('id', id); closeModal(); showView('usuarios') }
   catch(e){ document.getElementById('ep_erro').textContent='Erro: '+(e.message||e) }
 }
 async function excluirPerfilCloud(id){
   if(!confirm('Remover o acesso deste usuário?')) return
-  try { await sb.from('perfis').delete().eq('id', id); showView('usuarios') } catch(e){ alert('Erro: '+(e.message||e)) }
+  try {
+    const { error } = await sb.from('perfis').delete().eq('id', id)
+    if (error) throw error
+    showView('usuarios')
+  } catch(e){ alert('Erro ao excluir: '+(e.message||e)+'\n\nSe disser "permission", rode no Supabase a regra de DELETE que o suporte te passou.') }
 }
 
 // override: trocar senha do próprio usuário (Supabase)
