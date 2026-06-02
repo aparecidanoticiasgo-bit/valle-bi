@@ -2405,6 +2405,8 @@ function renderModAgricultura(c) {
   const areaTotal = safras.reduce((s,x)=>s+(Number(x.ha)||0),0)
   const sacasTotal = safras.reduce((s,x)=>s+(Number(x.sacas)||0),0)
   const receitaEstTotal = safras.reduce((s,x)=>s+((Number(x.sacas)||0)*(Number(x.preco)||0)),0)
+  const custoTotal = safras.reduce((s,x)=>s+(Number(x.custo)||0),0)
+  const margemTotal = receitaEstTotal - custoTotal
 
   // seletor de entidade (se houver mais de uma)
   const selEnt = state.entidades.length>1 ? `
@@ -2414,45 +2416,54 @@ function renderModAgricultura(c) {
         ${state.entidades.map(e=>`<option value="${e.id}" ${e.id===ent.id?'selected':''}>${e.nome}</option>`).join('')}
       </select></div>` : ''
 
-  // linhas de culturas
+  // linhas de culturas (cada cultura com seu próprio custo)
   const linhas = safras.map((x,i)=>{
-    const prod = (x.ha>0) ? (Number(x.sacas)||0)/Number(x.ha) : 0
-    const receita = (Number(x.sacas)||0)*(Number(x.preco)||0)
+    const ha=Number(x.ha)||0, sacas=Number(x.sacas)||0, preco=Number(x.preco)||0, custo=Number(x.custo)||0
+    const prod = ha>0 ? sacas/ha : 0
+    const receita = sacas*preco
+    const margem = receita - custo
+    const custoHa = ha>0 ? custo/ha : 0
+    const custoSaca = sacas>0 ? custo/sacas : 0
     const optCult = CULTURAS.map(cu=>`<option ${x.cultura===cu?'selected':''}>${cu}</option>`).join('')
-    return `<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #f3f4f6">
+    return `<div style="display:grid;grid-template-columns:1.2fr .8fr .8fr .9fr 1fr auto;gap:8px;align-items:center;padding:6px 0">
       <select class="form-input" onchange="setSafra(${i},'cultura',this.value)">${optCult}</select>
       <input class="form-input" type="number" step="any" value="${x.ha||''}" placeholder="ha" onchange="setSafra(${i},'ha',this.value)">
       <input class="form-input" type="number" step="any" value="${x.sacas||''}" placeholder="sacas" onchange="setSafra(${i},'sacas',this.value)">
-      <input class="form-input" type="number" step="any" value="${x.preco||''}" placeholder="R$/saca" onchange="setSafra(${i},'preco',this.value)">
+      <input class="form-input" type="number" step="any" value="${x.preco||''}" placeholder="R$/sc" onchange="setSafra(${i},'preco',this.value)">
+      <input class="form-input" type="number" step="any" value="${x.custo||''}" placeholder="custo total" onchange="setSafra(${i},'custo',this.value)">
       <button class="nav-btn" style="color:#dc2626" onclick="removerSafra(${i})">✕</button>
     </div>
-    <div style="display:flex;gap:18px;font-size:12px;color:#6b7280;padding:2px 0 8px 2px">
-      <span>Produtividade: <strong>${prod?prod.toFixed(1):'—'} sc/ha</strong></span>
-      <span>Receita estimada: <strong>${receita?fmt(receita):'—'}</strong></span>
+    <div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:#6b7280;padding:0 0 10px 2px;border-bottom:1px solid #f3f4f6;margin-bottom:6px">
+      <span>Produtiv.: <strong>${prod?prod.toFixed(1):'—'} sc/ha</strong></span>
+      <span>Custo/ha: <strong style="color:#dc2626">${custoHa?fmt(custoHa):'—'}</strong></span>
+      <span>Custo/saca: <strong style="color:#dc2626">${custoSaca?fmt(custoSaca):'—'}</strong></span>
+      <span>Receita: <strong style="color:#16a34a">${receita?fmt(receita):'—'}</strong></span>
+      <span>Margem: <strong style="color:${margem>=0?'#16a34a':'#dc2626'}">${(receita||custo)?fmt(margem):'—'}</strong></span>
     </div>`
   }).join('')
 
-  c.innerHTML = pageHeader(ICON.agro,'Agricultura','Custo por hectare, produtividade e margem por cultura') +
+  c.innerHTML = pageHeader(ICON.agro,'Agricultura','Custo, produção e margem separados por cultura') +
     selEnt +
     `<div class="widget-grid">
       ${modCard('Culturas da safra — '+ent.nome, `
-        <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr auto;gap:8px;font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;padding-bottom:4px">
-          <span>Cultura</span><span>Área (ha)</span><span>Produção (sc)</span><span>Preço/saca</span><span></span>
+        <div style="display:grid;grid-template-columns:1.2fr .8fr .8fr .9fr 1fr auto;gap:8px;font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;padding-bottom:4px">
+          <span>Cultura</span><span>Área(ha)</span><span>Prod.(sc)</span><span>Preço/sc</span><span>Custo total</span><span></span>
         </div>
         ${linhas || '<p style="color:#9ca3af;font-size:13px">Nenhuma cultura. Adicione abaixo.</p>'}
         <div style="margin-top:10px"><button class="btn-secondary" onclick="addSafra()">+ Adicionar cultura</button></div>
+        <p style="font-size:11px;color:#9ca3af;margin-top:8px">Informe o <strong>custo total</strong> de cada cultura para ver custo/ha, custo/saca e margem separados.</p>
       `)}
-      ${modCard('Indicadores gerais', `<div class="kpi-grid">
+      ${modCard('Totais da safra', `<div class="kpi-grid">
         <div class="kpi"><div class="kpi-label">Área Total</div><div class="kpi-value blue">${fmtNum(areaTotal)} ha</div></div>
-        <div class="kpi"><div class="kpi-label">Custo / hectare</div><div class="kpi-value neg">${areaTotal?fmt(d.despesaTotal/areaTotal):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Receita / hectare</div><div class="kpi-value pos">${areaTotal?fmt(d.receitaTotal/areaTotal):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Margem / hectare</div><div class="kpi-value ${(d.receitaTotal-d.despesaTotal)>=0?'pos':'neg'}">${areaTotal?fmt((d.receitaTotal-d.despesaTotal)/areaTotal):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Custo / saca</div><div class="kpi-value neg">${sacasTotal?fmt(d.despesaTotal/sacasTotal):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Receita estimada (culturas)</div><div class="kpi-value pos">${receitaEstTotal?fmt(receitaEstTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Custo Total (culturas)</div><div class="kpi-value neg">${custoTotal?fmt(custoTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Receita Estimada</div><div class="kpi-value pos">${receitaEstTotal?fmt(receitaEstTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Margem Total</div><div class="kpi-value ${margemTotal>=0?'pos':'neg'}">${(receitaEstTotal||custoTotal)?fmt(margemTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Custo/ha médio</div><div class="kpi-value neg">${areaTotal&&custoTotal?fmt(custoTotal/areaTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Custo financeiro (DRE)</div><div class="kpi-value" style="color:#6b7280">${fmt(d.despesaTotal)}</div><div class="kpi-sub">despesa total importada</div></div>
       </div>`)}
     </div>`
 }
-function addSafra(){ const e=agroEntidade(); if(!e)return; e.safras.push({cultura:'Soja',ha:0,sacas:0,preco:0}); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
+function addSafra(){ const e=agroEntidade(); if(!e)return; e.safras.push({cultura:'Soja',ha:0,sacas:0,preco:0,custo:0}); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
 function removerSafra(i){ const e=agroEntidade(); if(!e)return; e.safras.splice(i,1); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
 function setSafra(i,campo,val){
   const e=agroEntidade(); if(!e||!e.safras[i])return
