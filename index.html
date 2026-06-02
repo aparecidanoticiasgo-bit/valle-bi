@@ -1302,6 +1302,7 @@ function confirmarPivot() {
   state.importacoes.push({ id, nome, periodo, entidadeId: window._entidadeId || null, data: new Date().toISOString() })
   state.lancamentos.push(...lancamentos)
   saveState()
+  if (typeof registrarEvento==='function') registrarEvento('import', `${nome} (${lancamentos.length} lançamentos)`)
   closeModal()
   renderAll()
 }
@@ -1438,6 +1439,7 @@ function confirmarImportacao(totalRows) {
       state.importacoes.push({ id, nome, periodo, entidadeId: window._entidadeId || null, data: new Date().toISOString() })
       state.lancamentos.push(...lancamentos)
       saveState()
+      if (typeof registrarEvento==='function') registrarEvento('import', `${nome} (${lancamentos.length} lançamentos)`)
       closeModal()
       renderAll()
     } catch(err) {
@@ -3021,11 +3023,16 @@ async function fazerLogin(){
   iniciarApp()
 }
 
-async function registrarAcesso(u){
-  try { await sb.from('acessos').insert({ user_id:u.id, nome:u.nome, email:u.email, workspace:u.workspace }) } catch(e){}
+async function registrarAcesso(u){ return registrarEvento('login','', u) }
+// Log genérico de ações/auditoria
+async function registrarEvento(tipo, detalhe, u){
+  u = u || cloudUser
+  if (!u) return
+  try { await sb.from('acessos').insert({ user_id:u.id, nome:u.nome, email:u.email, workspace:(cloudWs||u.workspace), tipo, detalhe:detalhe||null }) } catch(e){}
 }
 
 async function logout(){
+  await registrarEvento('logout','')
   try { await sb.auth.signOut() } catch(e){}
   cloudUser = null; cloudWs = null
   document.getElementById('clienteOverlay')?.classList.add('hidden')
@@ -3085,19 +3092,29 @@ async function renderModUsuarios(c){
     const { data } = await qa
     acessos = data||[]
   } catch(e){}
+  const TIPO_EVENTO = {
+    login:{t:'Login',c:'#16a34a'}, logout:{t:'Logout',c:'#9ca3af'}, import:{t:'Importação',c:'#2563eb'},
+    lancamento:{t:'Lançamento',c:'#0c064b'}, criar_usuario:{t:'Criou usuário',c:'#7c3aed'},
+    excluir_usuario:{t:'Excluiu usuário',c:'#dc2626'}, nova_empresa:{t:'Nova empresa',c:'#0891b2'}
+  }
   const histLinhas = acessos.map(a=>{
     const dt = new Date(a.quando)
     const quando = dt.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})
-    return `<div class="dre-row ${''}" style="align-items:center">
-      <span class="dre-label">${a.nome||a.email||'—'}<span style="color:#9ca3af;font-weight:400"> · ${a.email||''}${ehSuporte()?' · '+(a.workspace||''):''}</span></span>
+    const ev = TIPO_EVENTO[a.tipo] || {t:a.tipo||'—',c:'#6b7280'}
+    return `<div class="dre-row" style="align-items:center">
+      <span class="dre-label">
+        <span style="font-size:10px;font-weight:700;color:#fff;background:${ev.c};padding:1px 7px;border-radius:99px">${ev.t}</span>
+        <strong style="margin-left:6px">${a.nome||a.email||'—'}</strong>
+        <span style="color:#9ca3af;font-weight:400">${a.detalhe?' · '+a.detalhe:''}${ehSuporte()?' · '+(a.workspace||''):''}</span>
+      </span>
       <span class="dre-val" style="color:#6b7280;font-weight:600">${quando}</span></div>`
   }).join('')
 
-  c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários, permissões e histórico de acessos') +
+  c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários, permissões e histórico de ações') +
     `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novoUsuarioCloud()">+ Novo Usuário</button></div>
      <div class="widget-grid">
        ${modCard('Usuários', linhas||'<p style="color:#9ca3af;font-size:13px">Nenhum usuário.</p>')}
-       ${modCard('Histórico de Acessos (últimos 50)', histLinhas||'<p style="color:#9ca3af;font-size:13px">Nenhum acesso registrado ainda. Os logins a partir de agora aparecem aqui.</p>')}
+       ${modCard('Histórico de Ações (últimas 50)', histLinhas||'<p style="color:#9ca3af;font-size:13px">Nenhuma ação registrada ainda. Logins, importações e cadastros a partir de agora aparecem aqui.</p>')}
      </div>`
 }
 
@@ -3135,6 +3152,7 @@ async function criarUsuarioCloud(){
     const permissoes = permsDoPerfil(papel)
     const { error:e2 } = await sb.from('perfis').insert({ id:uid, nome, workspace:ws, papel, permissoes, ativo:true })
     if(e2) throw e2
+    registrarEvento('criar_usuario', `${nome} (${email}) — ${papel}`)
     closeModal()
     showView('usuarios')
   } catch(e){ erro.style.color='#dc2626'; erro.textContent='Erro: '+(e.message||e) }
@@ -3197,6 +3215,7 @@ async function excluirPerfilCloud(id){
       alert('O banco não permitiu excluir (falta a regra de DELETE no Supabase).\n\nRode no SQL Editor a política de exclusão que o suporte enviou e tente de novo.')
       return
     }
+    registrarEvento('excluir_usuario', `${data[0].nome||''} (${data[0].workspace||''})`)
     showView('usuarios')
   } catch(e){ alert('Erro ao excluir: '+(e.message||e)) }
 }
@@ -3278,6 +3297,7 @@ async function salvarNovaEmpresa(){
     if(e2) throw e2
     // cria o registro de dados vazio da empresa
     try { await sb.from('dados').upsert({ workspace:emp, conteudo:{entidades:[],importacoes:[],lancamentos:[]} }) } catch(e){}
+    registrarEvento('nova_empresa', `${emp} · admin ${nome} (${email})`)
     closeModal(); showView('empresas')
   } catch(e){ erro.style.color='#dc2626'; erro.textContent='Erro: '+(e.message||e) }
 }
@@ -3312,6 +3332,7 @@ async function salvarUsuarioEmpresa(){
     if(error) throw error
     const { error:e2 } = await sb.from('perfis').insert({ id:data.user.id, nome, workspace:ws, papel, permissoes:permsDoPerfil(papel), ativo:true })
     if(e2) throw e2
+    registrarEvento('criar_usuario', `${nome} (${email}) — ${papel} · ${ws}`)
     closeModal(); showView('empresas')
   } catch(e){ erro.style.color='#dc2626'; erro.textContent='Erro: '+(e.message||e) }
 }
@@ -3496,6 +3517,7 @@ function salvarLancamentoManual(){
     state.importacoes.push({ id:'manual', nome:'Lançamentos manuais', periodo:null, data:new Date().toISOString() })
   }
   saveState()
+  registrarEvento('lancamento', `${tipo==='RECEITA'?'Receita':'Despesa'}: ${desc} — ${fmt(Math.abs(valor))}`)
   filteredLancamentos=[...state.lancamentos]
   closeModal()
   renderAll()
