@@ -6,6 +6,7 @@
 <title>Valle DRE Inteligente</title>
 <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0}
   body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;background:#f3f4f6;color:#1f2937;min-height:100vh}
@@ -268,15 +269,18 @@
     </div>
     <div class="form-group">
       <label class="form-label">Usuário ou e-mail</label>
-      <input class="form-input" id="loginUser" autocomplete="username" onkeydown="if(event.key==='Enter')fazerLogin()">
+      <input class="form-input" id="loginUser" autocomplete="off" onkeydown="if(event.key==='Enter')fazerLogin()">
     </div>
     <div class="form-group">
       <label class="form-label">Senha</label>
-      <input class="form-input" id="loginPass" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')fazerLogin()">
+      <div style="position:relative">
+        <input class="form-input" id="loginPass" type="password" autocomplete="new-password" onkeydown="if(event.key==='Enter')fazerLogin()" style="padding-right:60px">
+        <button type="button" onclick="const i=document.getElementById('loginPass');i.type=i.type==='password'?'text':'password';this.textContent=i.type==='password'?'mostrar':'ocultar'" style="position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;color:#0c064b;font-size:11px;cursor:pointer">mostrar</button>
+      </div>
     </div>
     <div id="loginErro" style="color:#dc2626;font-size:12px;min-height:16px;margin-bottom:8px"></div>
     <button class="btn-primary" style="width:100%;padding:11px" onclick="fazerLogin()">Entrar</button>
-    <div style="font-size:11px;color:#9ca3af;text-align:center;margin-top:14px">Primeiro acesso: <strong>admin</strong> / <strong>admin123</strong></div>
+    <div style="font-size:11px;color:#9ca3af;text-align:center;margin-top:14px">Acesse com seu e-mail e senha cadastrados</div>
   </div>
 </div>
 
@@ -2733,7 +2737,8 @@ function abrirEditarUsuario(id) {
       <div class="form-group"><label class="form-label">Perfil</label>
         <select class="form-input" id="eu_perfil" onchange="aplicarPermsPerfil()" ${u.id==='u_admin'?'disabled':''}>${opcoesPerfil}</select></div>
       <div class="form-group"><label class="form-label">${isNew?'Senha':'Nova senha (opcional)'}</label>
-        <input class="form-input" id="eu_senha" type="password" placeholder="${isNew?'':'deixe em branco p/ manter'}"></div>
+        <div style="position:relative">
+          <input class="form-input" id="eu_senha" type="text" autocomplete="off" placeholder="${isNew?'mín. 4 caracteres':'deixe em branco p/ manter'}"></div></div>
     </div>
     <div class="form-group">
       <label class="form-label">Permissões de módulos</label>
@@ -2790,19 +2795,220 @@ function excluirUsuario(id) {
 }
 
 // ============================================================
-// INIT
+// CAMADA DE NUVEM (Supabase) — sobrescreve auth e persistência
+// As funções abaixo, por serem declaradas DEPOIS, substituem as
+// versões localStorage (login, logout, salvar/carregar, usuários).
 // ============================================================
-loadState()
-filteredLancamentos = [...state.lancamentos]
-// preencher logo do login com a mesma imagem do header
-document.getElementById('loginLogo').src = document.querySelector('.logo img').src
-if (usuarioAtual()) {
-  if (ehSuporte()) { buildNav(); abrirSeletorClientes() }
-  else iniciarApp()
-} else {
-  buildNav()
+const SUPA_URL = 'https://rgjevluengevhrmjymor.supabase.co'
+const SUPA_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJnamV2bHVlbmdldmhybWp5bW9yIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODAzNjQ4NTcsImV4cCI6MjA5NTk0MDg1N30.qJ6dZV92qgYEVBESbref4Olx4nxDOTD7lbwmjrM9-7Q'
+const sb = window.supabase.createClient(SUPA_URL, SUPA_KEY)
+let cloudUser = null
+let cloudWs = null
+let _saveTimer = null
+
+function dadosApp(){
+  return { entidades:state.entidades||[], importacoes:state.importacoes||[], lancamentos:state.lancamentos||[],
+           regrasCategoria:state.regrasCategoria||[], alertas:state.alertas||[] }
+}
+
+// override: identidade vem do Supabase
+function usuarioAtual(){ return cloudUser }
+function ehAdmin(u){ u=u||cloudUser; return !!u && (u.perfil==='admin' || u.perfil==='suporte') }
+function ehSuporte(u){ u=u||cloudUser; return !!u && u.perfil==='suporte' }
+
+// override: não carrega do localStorage (carregamento é assíncrono via nuvem)
+function loadState(){}
+
+// override: salva na nuvem (debounced) + cache local
+function saveState(){
+  try { LS.setItem('cache_'+(cloudWs||'x'), JSON.stringify(dadosApp())) } catch(e){}
+  if (!cloudWs) return
+  clearTimeout(_saveTimer)
+  _saveTimer = setTimeout(async ()=>{
+    try { await sb.from('dados').upsert({ workspace:cloudWs, conteudo:dadosApp(), atualizado_em:new Date().toISOString() }) }
+    catch(e){ console.warn('Falha ao salvar na nuvem:', e) }
+  }, 700)
+}
+
+async function carregarPerfil(){
+  const { data:{ session } } = await sb.auth.getSession()
+  if (!session) return null
+  const { data:perfil } = await sb.from('perfis').select('*').eq('id', session.user.id).maybeSingle()
+  if (!perfil) return { erro:'sem_perfil', email:session.user.email }
+  cloudUser = { id:session.user.id, email:session.user.email, nome:perfil.nome||session.user.email,
+    perfil:perfil.papel, permissoes:perfil.permissoes||[], workspace:perfil.workspace, ativo:perfil.ativo }
+  return cloudUser
+}
+
+async function carregarDados(ws){
+  cloudWs = ws
+  let c = {}
+  try { const { data } = await sb.from('dados').select('conteudo').eq('workspace', ws).maybeSingle(); c = (data&&data.conteudo)||{} } catch(e){}
+  state = { entidades:c.entidades||[], importacoes:c.importacoes||[], lancamentos:c.lancamentos||[],
+            usuarios:[], sessao:null, regrasCategoria:c.regrasCategoria||[], alertas:c.alertas||[] }
+  filteredLancamentos = [...state.lancamentos]
+}
+
+async function fazerLogin(){
+  const email = document.getElementById('loginUser').value.trim()
+  const pass  = document.getElementById('loginPass').value
+  const erro  = document.getElementById('loginErro')
+  erro.style.color = '#dc2626'; erro.textContent = 'Entrando...'
+  const { error } = await sb.auth.signInWithPassword({ email, password:pass })
+  if (error){ erro.textContent = 'E-mail ou senha inválidos.'; return }
+  const u = await carregarPerfil()
+  if (!u || u.erro){ erro.textContent = 'Acesso ainda não liberado. Fale com o Suporte Valle.'; await sb.auth.signOut(); return }
+  if (u.ativo === false){ erro.textContent = 'Usuário inativo.'; await sb.auth.signOut(); return }
+  erro.textContent = ''; document.getElementById('loginPass').value = ''
+  if (u.perfil === 'suporte'){ document.getElementById('loginOverlay').classList.add('hidden'); abrirSeletorClientes(); return }
+  await carregarDados(u.workspace)
+  iniciarApp()
+}
+
+async function logout(){
+  try { await sb.auth.signOut() } catch(e){}
+  cloudUser = null; cloudWs = null
+  document.getElementById('clienteOverlay')?.classList.add('hidden')
   mostrarLogin()
 }
+
+// override: seletor de clientes do suporte (workspaces na nuvem)
+async function abrirSeletorClientes(){
+  const list = document.getElementById('clienteList')
+  list.innerHTML = '<p style="color:#9ca3af;font-size:13px">Carregando...</p>'
+  document.getElementById('clienteOverlay').classList.remove('hidden')
+  let nomes = []
+  try {
+    const { data:ds } = await sb.from('dados').select('workspace')
+    const { data:ps } = await sb.from('perfis').select('workspace')
+    nomes = [...new Set([...(ds||[]).map(r=>r.workspace), ...(ps||[]).map(r=>r.workspace)])]
+  } catch(e){}
+  if (!nomes.length) nomes = ['valle']
+  list.innerHTML = nomes.map(w=>`
+    <div style="display:flex;justify-content:space-between;align-items:center;border:1px solid #eef0f3;border-radius:10px;padding:12px 14px">
+      <strong style="font-size:14px;color:#111">${w}</strong>
+      <button class="btn-primary" style="padding:6px 14px;font-size:12px" onclick="acessarCliente('${w}')">Acessar</button>
+    </div>`).join('')
+}
+async function acessarCliente(ws){
+  await carregarDados(ws)
+  document.getElementById('clienteOverlay').classList.add('hidden')
+  iniciarApp()
+}
+
+// override: módulo de Usuários (perfis na nuvem)
+async function renderModUsuarios(c){
+  if (!ehAdmin()){ c.innerHTML = pageHeader(ICON.lock,'Acesso restrito','Apenas administradores.'); return }
+  c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários com acesso na nuvem') +
+    '<p style="color:#9ca3af;font-size:13px">Carregando...</p>'
+  let perfis = []
+  try {
+    let q = sb.from('perfis').select('*')
+    if (!ehSuporte()) q = q.eq('workspace', cloudUser.workspace)
+    const { data } = await q
+    perfis = data||[]
+  } catch(e){}
+  const linhas = perfis.map(p=>`
+    <div class="dre-row hl" style="align-items:center">
+      <span class="dre-label"><strong>${p.nome||'—'}</strong>
+        <span style="color:#9ca3af;font-weight:400"> · ${p.papel}${ehSuporte()?` · ${p.workspace}`:''}</span>
+        ${p.ativo===false?'<span style="color:#dc2626;font-size:11px"> (inativo)</span>':''}</span>
+      <span class="dre-val" style="gap:8px">
+        <button class="nav-btn" onclick="editarPerfilCloud('${p.id}','${(p.nome||'').replace(/'/g,'')}','${p.papel}',${p.ativo!==false})">Editar</button>
+        ${p.id!==cloudUser.id?`<button class="nav-btn" style="color:#dc2626" onclick="excluirPerfilCloud('${p.id}')">Excluir</button>`:''}
+      </span></div>`).join('')
+  c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários com acesso na nuvem') +
+    `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novoUsuarioCloud()">+ Novo Usuário</button></div>
+     <div class="widget-grid">${modCard('Usuários', linhas||'<p style="color:#9ca3af;font-size:13px">Nenhum usuário.</p>')}</div>`
+}
+
+function novoUsuarioCloud(){
+  const opc = Object.entries(PERFIS).filter(([k])=>k!=='suporte'||ehSuporte())
+    .map(([k,v])=>`<option value="${k}">${v.label}</option>`).join('')
+  document.getElementById('modalTitle').textContent = 'Novo Usuário'
+  document.getElementById('modalOverlay').classList.remove('hidden')
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="cu_nome"></div>
+    <div class="form-group"><label class="form-label">E-mail (será o login)</label><input class="form-input" id="cu_email" autocomplete="off"></div>
+    <div class="form-group"><label class="form-label">Senha (mín. 6)</label><input class="form-input" id="cu_senha" type="text" autocomplete="off"></div>
+    <div class="form-group"><label class="form-label">Perfil</label><select class="form-input" id="cu_papel">${opc}</select></div>
+    ${ehSuporte()?`<div class="form-group"><label class="form-label">Cliente (workspace)</label><input class="form-input" id="cu_ws" value="${cloudWs||cloudUser.workspace}"></div>`:''}
+    <div id="cu_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
+    <button class="btn-primary" style="width:100%" onclick="criarUsuarioCloud()">Criar usuário</button>`
+}
+
+async function criarUsuarioCloud(){
+  const nome=document.getElementById('cu_nome').value.trim()
+  const email=document.getElementById('cu_email').value.trim()
+  const senha=document.getElementById('cu_senha').value
+  const papel=document.getElementById('cu_papel').value
+  const ws = document.getElementById('cu_ws') ? document.getElementById('cu_ws').value.trim() : cloudUser.workspace
+  const erro=document.getElementById('cu_erro')
+  if(!nome||!email){ erro.textContent='Preencha nome e e-mail.'; return }
+  if(senha.length<6){ erro.textContent='Senha de no mínimo 6 caracteres.'; return }
+  erro.style.color='#6b7280'; erro.textContent='Criando...'
+  try {
+    // cliente temporário p/ não derrubar a sessão do admin
+    const tmp = window.supabase.createClient(SUPA_URL, SUPA_KEY, { auth:{ persistSession:false, storageKey:'tmp_signup' } })
+    const { data, error } = await tmp.auth.signUp({ email, password:senha })
+    if(error) throw error
+    const uid = data.user.id
+    const permissoes = permsDoPerfil(papel)
+    const { error:e2 } = await sb.from('perfis').insert({ id:uid, nome, workspace:ws, papel, permissoes, ativo:true })
+    if(e2) throw e2
+    closeModal()
+    showView('usuarios')
+  } catch(e){ erro.style.color='#dc2626'; erro.textContent='Erro: '+(e.message||e) }
+}
+
+function editarPerfilCloud(id,nome,papel,ativo){
+  const opc = Object.entries(PERFIS).filter(([k])=>k!=='suporte'||ehSuporte())
+    .map(([k,v])=>`<option value="${k}" ${papel===k?'selected':''}>${v.label}</option>`).join('')
+  document.getElementById('modalTitle').textContent='Editar Usuário'
+  document.getElementById('modalOverlay').classList.remove('hidden')
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group"><label class="form-label">Nome</label><input class="form-input" id="ep_nome" value="${nome}"></div>
+    <div class="form-group"><label class="form-label">Perfil</label><select class="form-input" id="ep_papel">${opc}</select></div>
+    <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px"><input type="checkbox" id="ep_ativo" ${ativo?'checked':''}> Usuário ativo</label>
+    <p style="font-size:12px;color:#9ca3af">Para trocar a senha, o usuário usa "Esqueci minha senha" ou o Suporte redefine.</p>
+    <div id="ep_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
+    <button class="btn-primary" style="width:100%" onclick="salvarPerfilCloud('${id}')">Salvar</button>`
+}
+async function salvarPerfilCloud(id){
+  const nome=document.getElementById('ep_nome').value.trim()
+  const papel=document.getElementById('ep_papel').value
+  const ativo=document.getElementById('ep_ativo').checked
+  try { await sb.from('perfis').update({ nome, papel, permissoes:permsDoPerfil(papel), ativo }).eq('id', id); closeModal(); showView('usuarios') }
+  catch(e){ document.getElementById('ep_erro').textContent='Erro: '+(e.message||e) }
+}
+async function excluirPerfilCloud(id){
+  if(!confirm('Remover o acesso deste usuário?')) return
+  try { await sb.from('perfis').delete().eq('id', id); showView('usuarios') } catch(e){ alert('Erro: '+(e.message||e)) }
+}
+
+// override: trocar senha do próprio usuário (Supabase)
+async function salvarTrocaSenha(){
+  const nova=document.getElementById('ts_nova').value
+  const conf=document.getElementById('ts_conf').value
+  const erro=document.getElementById('ts_erro')
+  if(nova.length<6){ erro.textContent='A nova senha deve ter ao menos 6 caracteres.'; return }
+  if(nova!==conf){ erro.textContent='As senhas não coincidem.'; return }
+  try { const { error } = await sb.auth.updateUser({ password:nova }); if(error) throw error; closeModal() }
+  catch(e){ erro.textContent='Erro: '+(e.message||e) }
+}
+
+// ============================================================
+// INIT (nuvem)
+// ============================================================
+async function bootCloud(){
+  document.getElementById('loginLogo').src = document.querySelector('.logo img').src
+  const u = await carregarPerfil()
+  if (!u || u.erro){ buildNav(); mostrarLogin(); return }
+  if (u.perfil === 'suporte'){ buildNav(); abrirSeletorClientes(); return }
+  await carregarDados(u.workspace)
+  iniciarApp()
+}
+bootCloud()
 </script>
 
 <!-- FOOTER -->
