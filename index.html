@@ -3307,13 +3307,27 @@ const PRODUTOS_COT = [
   { id:'diesel',      rotulo:'Diesel',       unidade:'L' },
 ]
 
+const UFS = ['BR','AC','AL','AP','AM','BA','CE','DF','ES','GO','MA','MT','MS','MG','PA','PB','PR','PE','PI','RJ','RN','RS','RO','RR','SC','SP','SE','TO']
+let mercadoUF = 'TODOS'
 async function renderModMercado(c){
   c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias e valor do rebanho') +
     '<p style="color:#9ca3af;font-size:13px">Carregando cotações...</p>'
-  let rows = []
-  try { const { data } = await sb.from('cotacoes').select('*').order('data',{ascending:false}).limit(500); rows = data||[] } catch(e){}
+  let rowsAll = []
+  try { const { data } = await sb.from('cotacoes').select('*').order('data',{ascending:false}).limit(1000); rowsAll = data||[] } catch(e){}
 
-  // última e penúltima cotação por produto (estado BR ou primeiro disponível)
+  // estados que têm cotação + filtro
+  const estadosComDados = [...new Set(rowsAll.map(r=>r.estado).filter(Boolean))]
+  const rows = (mercadoUF==='TODOS') ? rowsAll : rowsAll.filter(r=>r.estado===mercadoUF)
+  const filtroUF = `<div class="filter-bar" style="border:none;margin-bottom:12px">
+      <span class="filter-label">Estado</span>
+      <select class="filter-input" onchange="mercadoUF=this.value;renderModMercado(document.getElementById('viewGeneric'))">
+        <option value="TODOS" ${mercadoUF==='TODOS'?'selected':''}>Todos os estados</option>
+        ${UFS.map(uf=>`<option value="${uf}" ${mercadoUF===uf?'selected':''}>${uf==='BR'?'Nacional (BR)':uf}${estadosComDados.includes(uf)?' •':''}</option>`).join('')}
+      </select>
+      <span style="font-size:11px;color:#9ca3af">• = tem cotação cadastrada</span>
+    </div>`
+
+  // última e penúltima cotação por produto (no estado filtrado)
   const cards = PRODUTOS_COT.map(p=>{
     const hist = rows.filter(r=>r.produto===p.id).sort((a,b)=> (a.data<b.data?1:-1))
     const atual = hist[0]
@@ -3346,13 +3360,12 @@ async function renderModMercado(c){
     ${!d.totalArrobas?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Importe planilha com arrobas para calcular o valor do rebanho.</p>':''}
   `)
 
-  const botaoAdd = ehAdmin() ? `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novaCotacao()">+ Lançar cotação</button>
-    <span style="font-size:12px;color:#9ca3af;margin-left:10px">Atualização automática (CEPEA) entra via Edge Function — configuração à parte.</span></div>` : ''
+  const botaoAdd = ehAdmin() ? `<div style="margin-bottom:8px"><button class="btn-primary" onclick="novaCotacao()">+ Lançar cotação</button></div>` : ''
 
-  c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias e valor do rebanho') +
-    botaoAdd +
+  c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias por estado e valor do rebanho') +
+    botaoAdd + filtroUF +
     `<div class="widget-grid">
-      ${modCard('Cotações atuais', `<div class="kpi-grid">${cards}</div>`)}
+      ${modCard('Cotações atuais'+(mercadoUF!=='TODOS'?' — '+mercadoUF:''), `<div class="kpi-grid">${cards}</div>`)}
       ${rebanhoCard}
     </div>`
 }
