@@ -3015,9 +3015,14 @@ async function fazerLogin(){
   if (!u || u.erro){ erro.textContent = 'Acesso ainda não liberado. Fale com o Suporte Valle.'; await sb.auth.signOut(); return }
   if (u.ativo === false){ erro.textContent = 'Usuário inativo.'; await sb.auth.signOut(); return }
   erro.textContent = ''; document.getElementById('loginPass').value = ''
+  registrarAcesso(u)
   if (u.perfil === 'suporte'){ document.getElementById('loginOverlay').classList.add('hidden'); abrirSeletorClientes(); return }
   await carregarDados(u.workspace)
   iniciarApp()
+}
+
+async function registrarAcesso(u){
+  try { await sb.from('acessos').insert({ user_id:u.id, nome:u.nome, email:u.email, workspace:u.workspace }) } catch(e){}
 }
 
 async function logout(){
@@ -3072,9 +3077,28 @@ async function renderModUsuarios(c){
         <button class="nav-btn" onclick="editarPerfilCloud('${p.id}')">Editar</button>
         ${p.id!==cloudUser.id?`<button class="nav-btn" style="color:#dc2626" onclick="excluirPerfilCloud('${p.id}')">Excluir</button>`:''}
       </span></div>`).join('')
-  c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários com acesso na nuvem') +
+
+  // histórico de acessos
+  let acessos = []
+  try {
+    let qa = sb.from('acessos').select('*').order('quando',{ascending:false}).limit(50)
+    const { data } = await qa
+    acessos = data||[]
+  } catch(e){}
+  const histLinhas = acessos.map(a=>{
+    const dt = new Date(a.quando)
+    const quando = dt.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})
+    return `<div class="dre-row ${''}" style="align-items:center">
+      <span class="dre-label">${a.nome||a.email||'—'}<span style="color:#9ca3af;font-weight:400"> · ${a.email||''}${ehSuporte()?' · '+(a.workspace||''):''}</span></span>
+      <span class="dre-val" style="color:#6b7280;font-weight:600">${quando}</span></div>`
+  }).join('')
+
+  c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários, permissões e histórico de acessos') +
     `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novoUsuarioCloud()">+ Novo Usuário</button></div>
-     <div class="widget-grid">${modCard('Usuários', linhas||'<p style="color:#9ca3af;font-size:13px">Nenhum usuário.</p>')}</div>`
+     <div class="widget-grid">
+       ${modCard('Usuários', linhas||'<p style="color:#9ca3af;font-size:13px">Nenhum usuário.</p>')}
+       ${modCard('Histórico de Acessos (últimos 50)', histLinhas||'<p style="color:#9ca3af;font-size:13px">Nenhum acesso registrado ainda. Os logins a partir de agora aparecem aqui.</p>')}
+     </div>`
 }
 
 function novoUsuarioCloud(){
