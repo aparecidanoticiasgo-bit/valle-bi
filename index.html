@@ -3004,10 +3004,14 @@ async function salvarPerfilCloud(id){
 async function excluirPerfilCloud(id){
   if(!confirm('Remover o acesso deste usuário?')) return
   try {
-    const { error } = await sb.from('perfis').delete().eq('id', id)
+    const { data, error } = await sb.from('perfis').delete().eq('id', id).select()
     if (error) throw error
+    if (!data || !data.length){
+      alert('O banco não permitiu excluir (falta a regra de DELETE no Supabase).\n\nRode no SQL Editor a política de exclusão que o suporte enviou e tente de novo.')
+      return
+    }
     showView('usuarios')
-  } catch(e){ alert('Erro ao excluir: '+(e.message||e)+'\n\nSe disser "permission", rode no Supabase a regra de DELETE que o suporte te passou.') }
+  } catch(e){ alert('Erro ao excluir: '+(e.message||e)) }
 }
 
 // override: trocar senha do próprio usuário (Supabase)
