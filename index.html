@@ -3064,6 +3064,9 @@ async function acessarCliente(ws){
 }
 
 // override: módulo de Usuários (perfis na nuvem)
+let histFiltroTipo = 'TODOS'
+let histFiltroUser = 'TODOS'
+function setHistFiltro(campo, val){ if(campo==='tipo') histFiltroTipo=val; else histFiltroUser=val; renderModUsuarios(document.getElementById('viewGeneric')) }
 async function renderModUsuarios(c){
   if (!ehAdmin()){ c.innerHTML = pageHeader(ICON.lock,'Acesso restrito','Apenas administradores.'); return }
   c.innerHTML = pageHeader(ICON.usuarios,'Administração de Usuários','Usuários com acesso na nuvem') +
@@ -3085,18 +3088,35 @@ async function renderModUsuarios(c){
         ${p.id!==cloudUser.id?`<button class="nav-btn" style="color:#dc2626" onclick="excluirPerfilCloud('${p.id}')">Excluir</button>`:''}
       </span></div>`).join('')
 
-  // histórico de acessos
-  let acessos = []
+  // histórico de acessos (com filtros)
+  let acessosAll = []
   try {
-    let qa = sb.from('acessos').select('*').order('quando',{ascending:false}).limit(50)
-    const { data } = await qa
-    acessos = data||[]
+    const { data } = await sb.from('acessos').select('*').order('quando',{ascending:false}).limit(300)
+    acessosAll = data||[]
   } catch(e){}
+  // usuários distintos no log (para o filtro)
+  const usuariosLog = [...new Map(acessosAll.map(a=>[a.email||a.nome,{nome:a.nome,email:a.email}])).values()]
+  const acessos = acessosAll.filter(a=>
+    (histFiltroTipo==='TODOS' || a.tipo===histFiltroTipo) &&
+    (histFiltroUser==='TODOS' || (a.email||a.nome)===histFiltroUser)
+  ).slice(0,100)
   const TIPO_EVENTO = {
     login:{t:'Login',c:'#16a34a'}, logout:{t:'Logout',c:'#9ca3af'}, import:{t:'Importação',c:'#2563eb'},
     lancamento:{t:'Lançamento',c:'#0c064b'}, criar_usuario:{t:'Criou usuário',c:'#7c3aed'},
     excluir_usuario:{t:'Excluiu usuário',c:'#dc2626'}, nova_empresa:{t:'Nova empresa',c:'#0891b2'}
   }
+  const filtroHist = `<div class="filter-bar" style="border:none;padding:0 0 10px">
+      <span class="filter-label">Filtrar</span>
+      <select class="filter-input" onchange="setHistFiltro('tipo',this.value)">
+        <option value="TODOS" ${histFiltroTipo==='TODOS'?'selected':''}>Todas as ações</option>
+        ${Object.entries(TIPO_EVENTO).map(([k,v])=>`<option value="${k}" ${histFiltroTipo===k?'selected':''}>${v.t}</option>`).join('')}
+      </select>
+      <select class="filter-input" onchange="setHistFiltro('user',this.value)">
+        <option value="TODOS" ${histFiltroUser==='TODOS'?'selected':''}>Todos os usuários</option>
+        ${usuariosLog.map(u=>`<option value="${u.email||u.nome}" ${histFiltroUser===(u.email||u.nome)?'selected':''}>${u.nome||u.email}</option>`).join('')}
+      </select>
+      ${(histFiltroTipo!=='TODOS'||histFiltroUser!=='TODOS')?`<button class="filter-btn-clear" onclick="histFiltroTipo='TODOS';histFiltroUser='TODOS';renderModUsuarios(document.getElementById('viewGeneric'))">✕ Limpar</button>`:''}
+    </div>`
   const histLinhas = acessos.map(a=>{
     const dt = new Date(a.quando)
     const quando = dt.toLocaleString('pt-BR',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'})
@@ -3114,7 +3134,7 @@ async function renderModUsuarios(c){
     `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novoUsuarioCloud()">+ Novo Usuário</button></div>
      <div class="widget-grid">
        ${modCard('Usuários', linhas||'<p style="color:#9ca3af;font-size:13px">Nenhum usuário.</p>')}
-       ${modCard('Histórico de Ações (últimas 50)', histLinhas||'<p style="color:#9ca3af;font-size:13px">Nenhuma ação registrada ainda. Logins, importações e cadastros a partir de agora aparecem aqui.</p>')}
+       ${modCard('Histórico de Ações', filtroHist + (histLinhas||'<p style="color:#9ca3af;font-size:13px">Nenhuma ação encontrada para este filtro.</p>'))}
      </div>`
 }
 
