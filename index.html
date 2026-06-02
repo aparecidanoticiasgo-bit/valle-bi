@@ -2378,42 +2378,87 @@ function renderModConsultor(c) {
 // ============================================================
 // MÓDULO: AGRICULTURA
 // ============================================================
+const CULTURAS = ['Soja','Milho','Gergelim','Feijão','Algodão','Sorgo','Cana','Café','Trigo','Arroz','Girassol','Outra']
+let agroEntId = null
+
+function agroEntidade(){
+  if (!state.entidades || !state.entidades.length) return null
+  let ent = state.entidades.find(e=>e.id===agroEntId) || state.entidades[0]
+  agroEntId = ent.id
+  // migrar formato antigo (hectares/sacasColhidas) para safras[]
+  if (!ent.safras) {
+    ent.safras = []
+    if (ent.hectares) ent.safras.push({ cultura:'Soja', ha:Number(ent.hectares)||0, sacas:Number(ent.sacasColhidas)||0, preco:0 })
+  }
+  return ent
+}
+
 function renderModAgricultura(c) {
   const d = dadosAtuais()
-  const ent = state.entidades.find(e => e.id === (document.getElementById('filterEntidade')?.value)) || state.entidades[0]
-  const ha = (ent && ent.hectares) ? Number(ent.hectares) : 0
-  const sacas = (ent && ent.sacasColhidas) ? Number(ent.sacasColhidas) : 0
-  const receitaGraos = Object.entries(d.porCategoriaRec).filter(([k])=>/grão|grao|soja|milho|algod|caf/i.test(k)).reduce((s,[,v])=>s+v,0)
+  const ent = agroEntidade()
+  if (!ent) {
+    c.innerHTML = pageHeader(ICON.agro,'Agricultura','Custo por hectare, produtividade e margem por cultura') +
+      '<p style="color:#9ca3af;font-size:13px">Cadastre uma entidade (fazenda) em <strong>Cadastros</strong> para usar a Agricultura.</p>'
+    return
+  }
+  const safras = ent.safras || []
+  const areaTotal = safras.reduce((s,x)=>s+(Number(x.ha)||0),0)
+  const sacasTotal = safras.reduce((s,x)=>s+(Number(x.sacas)||0),0)
+  const receitaEstTotal = safras.reduce((s,x)=>s+((Number(x.sacas)||0)*(Number(x.preco)||0)),0)
+
+  // seletor de entidade (se houver mais de uma)
+  const selEnt = state.entidades.length>1 ? `
+    <div class="form-group" style="max-width:320px">
+      <label class="form-label">Fazenda / entidade</label>
+      <select class="form-input" onchange="agroEntId=this.value;renderModAgricultura(document.getElementById('viewGeneric'))">
+        ${state.entidades.map(e=>`<option value="${e.id}" ${e.id===ent.id?'selected':''}>${e.nome}</option>`).join('')}
+      </select></div>` : ''
+
+  // linhas de culturas
+  const linhas = safras.map((x,i)=>{
+    const prod = (x.ha>0) ? (Number(x.sacas)||0)/Number(x.ha) : 0
+    const receita = (Number(x.sacas)||0)*(Number(x.preco)||0)
+    const optCult = CULTURAS.map(cu=>`<option ${x.cultura===cu?'selected':''}>${cu}</option>`).join('')
+    return `<div style="display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr auto;gap:8px;align-items:center;padding:6px 0;border-bottom:1px solid #f3f4f6">
+      <select class="form-input" onchange="setSafra(${i},'cultura',this.value)">${optCult}</select>
+      <input class="form-input" type="number" step="any" value="${x.ha||''}" placeholder="ha" onchange="setSafra(${i},'ha',this.value)">
+      <input class="form-input" type="number" step="any" value="${x.sacas||''}" placeholder="sacas" onchange="setSafra(${i},'sacas',this.value)">
+      <input class="form-input" type="number" step="any" value="${x.preco||''}" placeholder="R$/saca" onchange="setSafra(${i},'preco',this.value)">
+      <button class="nav-btn" style="color:#dc2626" onclick="removerSafra(${i})">✕</button>
+    </div>
+    <div style="display:flex;gap:18px;font-size:12px;color:#6b7280;padding:2px 0 8px 2px">
+      <span>Produtividade: <strong>${prod?prod.toFixed(1):'—'} sc/ha</strong></span>
+      <span>Receita estimada: <strong>${receita?fmt(receita):'—'}</strong></span>
+    </div>`
+  }).join('')
 
   c.innerHTML = pageHeader(ICON.agro,'Agricultura','Custo por hectare, produtividade e margem por cultura') +
+    selEnt +
     `<div class="widget-grid">
-      ${modCard('Parâmetros da safra', `
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-          <div class="form-group"><label class="form-label">Área plantada (ha)</label>
-            <input class="form-input" id="agro_ha" type="number" step="any" value="${ha||''}" placeholder="ex: 500" oninput="salvarParamAgro()"></div>
-          <div class="form-group"><label class="form-label">Produção colhida (sacas)</label>
-            <input class="form-input" id="agro_sacas" type="number" step="any" value="${sacas||''}" placeholder="ex: 30000" oninput="salvarParamAgro()"></div>
+      ${modCard('Culturas da safra — '+ent.nome, `
+        <div style="display:grid;grid-template-columns:1.3fr 1fr 1fr 1fr auto;gap:8px;font-size:11px;color:#9ca3af;font-weight:700;text-transform:uppercase;padding-bottom:4px">
+          <span>Cultura</span><span>Área (ha)</span><span>Produção (sc)</span><span>Preço/saca</span><span></span>
         </div>
-        <p style="font-size:11px;color:#9ca3af">Salvo na entidade selecionada${ent?` (${ent.nome})`:''}.</p>
+        ${linhas || '<p style="color:#9ca3af;font-size:13px">Nenhuma cultura. Adicione abaixo.</p>'}
+        <div style="margin-top:10px"><button class="btn-secondary" onclick="addSafra()">+ Adicionar cultura</button></div>
       `)}
-      ${modCard('Indicadores', `<div class="kpi-grid">
-        <div class="kpi"><div class="kpi-label">Custo / hectare</div><div class="kpi-value neg">${ha?fmt(d.despesaTotal/ha):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Receita / hectare</div><div class="kpi-value pos">${ha?fmt(d.receitaTotal/ha):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Margem / hectare</div><div class="kpi-value ${(d.receitaTotal-d.despesaTotal)>=0?'pos':'neg'}">${ha?fmt((d.receitaTotal-d.despesaTotal)/ha):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Produtividade</div><div class="kpi-value blue">${ha&&sacas?(sacas/ha).toFixed(1)+' sc/ha':'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Custo / saca</div><div class="kpi-value neg">${sacas?fmt(d.despesaTotal/sacas):'—'}</div></div>
-        <div class="kpi"><div class="kpi-label">Receita grãos</div><div class="kpi-value pos">${fmt(receitaGraos)}</div></div>
+      ${modCard('Indicadores gerais', `<div class="kpi-grid">
+        <div class="kpi"><div class="kpi-label">Área Total</div><div class="kpi-value blue">${fmtNum(areaTotal)} ha</div></div>
+        <div class="kpi"><div class="kpi-label">Custo / hectare</div><div class="kpi-value neg">${areaTotal?fmt(d.despesaTotal/areaTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Receita / hectare</div><div class="kpi-value pos">${areaTotal?fmt(d.receitaTotal/areaTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Margem / hectare</div><div class="kpi-value ${(d.receitaTotal-d.despesaTotal)>=0?'pos':'neg'}">${areaTotal?fmt((d.receitaTotal-d.despesaTotal)/areaTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Custo / saca</div><div class="kpi-value neg">${sacasTotal?fmt(d.despesaTotal/sacasTotal):'—'}</div></div>
+        <div class="kpi"><div class="kpi-label">Receita estimada (culturas)</div><div class="kpi-value pos">${receitaEstTotal?fmt(receitaEstTotal):'—'}</div></div>
       </div>`)}
-    </div>
-    ${!ha?'<p style="color:#9ca3af;font-size:13px;margin-top:12px">Informe a área plantada para calcular os indicadores por hectare.</p>':''}`
+    </div>`
 }
-function salvarParamAgro() {
-  const sel = document.getElementById('filterEntidade')?.value
-  const ent = state.entidades.find(e=>e.id===sel) || state.entidades[0]
-  if (!ent) return
-  ent.hectares = Number(document.getElementById('agro_ha').value) || 0
-  ent.sacasColhidas = Number(document.getElementById('agro_sacas').value) || 0
+function addSafra(){ const e=agroEntidade(); if(!e)return; e.safras.push({cultura:'Soja',ha:0,sacas:0,preco:0}); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
+function removerSafra(i){ const e=agroEntidade(); if(!e)return; e.safras.splice(i,1); saveState(); renderModAgricultura(document.getElementById('viewGeneric')) }
+function setSafra(i,campo,val){
+  const e=agroEntidade(); if(!e||!e.safras[i])return
+  e.safras[i][campo] = (campo==='cultura') ? val : (parseFloat(val)||0)
   saveState()
+  renderModAgricultura(document.getElementById('viewGeneric'))
 }
 
 // ============================================================
