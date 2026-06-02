@@ -1889,38 +1889,90 @@ function chartToolbar(id){
 
 // Registro de KPIs disponíveis (cada um calcula valor/cor/sub a partir de d)
 const KPI_DEFS = [
-  { id:'receita',     label:'Receita Total',      get:d=>({v:fmt(d.receitaTotal), cls:'pos'}) },
-  { id:'despesa',     label:'Custos Totais',      get:d=>({v:fmt(d.despesaTotal), cls:'neg'}) },
-  { id:'resultado',   label:'Resultado',          get:d=>({v:fmt(d.resultado), cls:d.resultado>=0?'pos':'neg'}) },
-  { id:'ebitda',      label:'EBITDA',             get:d=>({v:fmt(d.ebitda), cls:'blue'}) },
-  { id:'margem',      label:'Margem Líquida',     get:d=>({v:fmtPct(d.margem), cls:d.margem>=15?'pos':d.margem>=5?'yellow':'neg', sub:'sobre receita bruta'}) },
-  { id:'pctDespesa',  label:'% Despesa',          get:d=>({v:d.receitaTotal>0?fmtPct(d.despesaTotal/d.receitaTotal*100):'—', cls:'neg'}) },
-  { id:'lucroCabeca', label:'Lucro / Cabeça',     get:d=>({v:fmt(d.totalCabecas?(d.receitaTotal-d.despesaTotal)/d.totalCabecas:0), cls:'pos'}) },
-  { id:'custoCabeca', label:'Custo / Cabeça',     get:d=>({v:fmt(d.custoPorCabeca), cls:'neg'}) },
-  { id:'receitaArroba',label:'Receita / Arroba',  get:d=>({v:fmt(d.receitaPorArroba), cls:'pos'}) },
-  { id:'custoArroba', label:'Custo / Arroba',     get:d=>({v:fmt(d.totalArrobas?d.despesaTotal/d.totalArrobas:0), cls:'neg'}) },
-  { id:'cabecas',     label:'Total de Cabeças',   get:d=>({v:fmtNum(d.totalCabecas), cls:'blue'}) },
-  { id:'arrobas',     label:'Total de Arrobas',   get:d=>({v:fmtNum(d.totalArrobas), cls:'yellow'}) },
+  { id:'receita',     label:'Receita Total',      tipo:'currency', raw:d=>d.receitaTotal, get:d=>({v:fmt(d.receitaTotal), cls:'pos'}) },
+  { id:'despesa',     label:'Custos Totais',      tipo:'currency', raw:d=>d.despesaTotal, get:d=>({v:fmt(d.despesaTotal), cls:'neg'}) },
+  { id:'resultado',   label:'Resultado',          tipo:'currency', raw:d=>d.resultado, get:d=>({v:fmt(d.resultado), cls:d.resultado>=0?'pos':'neg'}) },
+  { id:'ebitda',      label:'EBITDA',             tipo:'currency', raw:d=>d.ebitda, get:d=>({v:fmt(d.ebitda), cls:'blue'}) },
+  { id:'margem',      label:'Margem Líquida',     tipo:'percent',  raw:d=>d.margem, get:d=>({v:fmtPct(d.margem), cls:d.margem>=15?'pos':d.margem>=5?'yellow':'neg', sub:'sobre receita bruta'}) },
+  { id:'pctDespesa',  label:'% Despesa',          tipo:'percent',  raw:d=>d.receitaTotal>0?d.despesaTotal/d.receitaTotal*100:0, get:d=>({v:d.receitaTotal>0?fmtPct(d.despesaTotal/d.receitaTotal*100):'—', cls:'neg'}) },
+  { id:'lucroCabeca', label:'Lucro / Cabeça',     tipo:'currency', raw:d=>d.totalCabecas?(d.receitaTotal-d.despesaTotal)/d.totalCabecas:0, get:d=>({v:fmt(d.totalCabecas?(d.receitaTotal-d.despesaTotal)/d.totalCabecas:0), cls:'pos'}) },
+  { id:'custoCabeca', label:'Custo / Cabeça',     tipo:'currency', raw:d=>d.custoPorCabeca, get:d=>({v:fmt(d.custoPorCabeca), cls:'neg'}) },
+  { id:'receitaArroba',label:'Receita / Arroba',  tipo:'currency', raw:d=>d.receitaPorArroba, get:d=>({v:fmt(d.receitaPorArroba), cls:'pos'}) },
+  { id:'custoArroba', label:'Custo / Arroba',     tipo:'currency', raw:d=>d.totalArrobas?d.despesaTotal/d.totalArrobas:0, get:d=>({v:fmt(d.totalArrobas?d.despesaTotal/d.totalArrobas:0), cls:'neg'}) },
+  { id:'cabecas',     label:'Total de Cabeças',   tipo:'number',   raw:d=>d.totalCabecas, get:d=>({v:fmtNum(d.totalCabecas), cls:'blue'}) },
+  { id:'arrobas',     label:'Total de Arrobas',   tipo:'number',   raw:d=>d.totalArrobas, get:d=>({v:fmtNum(d.totalArrobas), cls:'yellow'}) },
 ]
 const KPI_KEY = 'dre_kpis_v1'
+const KPI_VIEW_KEY = 'dre_kpis_view'
 const KPI_DEFAULT = ['receita','despesa','resultado','ebitda','margem','pctDespesa']
 function kpisVisiveis() {
   try { const s = JSON.parse(LS.getItem(KPI_KEY)); if (Array.isArray(s)) return s } catch(e){}
   return KPI_DEFAULT.slice()
 }
 function setKpisVisiveis(arr) { LS.setItem(KPI_KEY, JSON.stringify(arr)) }
+function kpiView(){ return LS.getItem(KPI_VIEW_KEY) || 'cards' }
+function setKpiView(v){ LS.setItem(KPI_VIEW_KEY, v); renderDashboard() }
+function fmtKpi(tipo, val){ return tipo==='percent' ? fmtPct(val) : tipo==='number' ? fmtNum(val) : fmt(val) }
 
 function htmlKpis(d) {
   const vis = kpisVisiveis()
-  const cards = KPI_DEFS.filter(k=>vis.includes(k.id)).map(k=>{
+  const defs = KPI_DEFS.filter(k=>vis.includes(k.id))
+  const view = kpiView()
+  const toggle = `<div style="display:flex;justify-content:flex-end;gap:6px;margin-bottom:8px">
+      <button class="nav-btn" style="font-size:11px;padding:4px 10px${view==='cards'?';background:var(--green);color:#fff':''}" onclick="setKpiView('cards')">Números</button>
+      <button class="nav-btn" style="font-size:11px;padding:4px 10px${view==='grafico'?';background:var(--green);color:#fff':''}" onclick="setKpiView('grafico')">Gráfico</button>
+      <button class="nav-btn" style="font-size:11px;padding:4px 10px" onclick="abrirConfigKpis()">⚙ Configurar</button>
+    </div>`
+
+  if (view === 'grafico') {
+    // separa monetários (vão pro gráfico) e os demais (chips)
+    const chartDefs = defs.filter(k=>k.tipo==='currency')
+    const outros = defs.filter(k=>k.tipo!=='currency')
+    window._kpiChartData = { labels: chartDefs.map(k=>k.label), valores: chartDefs.map(k=>k.raw(d)) }
+    const chips = outros.map(k=>{ const r=k.get(d); return `<span class="kpi" style="display:inline-block;padding:8px 14px"><span class="kpi-label">${k.label}</span> <span class="kpi-value ${r.cls}" style="font-size:16px">${r.v}</span></span>` }).join(' ')
+    requestAnimationFrame(renderKpiChart)
+    return toggle +
+      (chartDefs.length ? `<div class="chart-wrap" style="height:${Math.max(220, chartDefs.length*46)}px"><canvas id="cKpis"></canvas></div>` : '<p style="color:#9ca3af;font-size:13px">Selecione KPIs monetários para o gráfico.</p>') +
+      (chips ? `<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:12px">${chips}</div>` : '')
+  }
+
+  const cards = defs.map(k=>{
     const r = k.get(d)
     return `<div class="kpi"><div class="kpi-label">${k.label}</div>
       <div class="kpi-value ${r.cls||''}">${r.v}</div>${r.sub?`<div class="kpi-sub">${r.sub}</div>`:''}</div>`
   }).join('')
-  return `<div style="display:flex;justify-content:flex-end;margin-bottom:8px">
-      <button class="nav-btn" style="font-size:11px;padding:4px 10px" onclick="abrirConfigKpis()">⚙ Configurar KPIs</button>
-    </div>
-    <div class="kpi-grid">${cards || '<p style="color:#9ca3af;font-size:13px">Nenhum KPI selecionado.</p>'}</div>`
+  return toggle + `<div class="kpi-grid">${cards || '<p style="color:#9ca3af;font-size:13px">Nenhum KPI selecionado.</p>'}</div>`
+}
+
+// plugin inline para mostrar o valor na ponta da barra
+const _kpiLabelPlugin = {
+  id:'kpiLabels',
+  afterDatasetsDraw(chart){
+    const ds = chart.data.datasets[0]; if(!ds) return
+    const ctx = chart.ctx; ctx.save()
+    ctx.font = '700 12px -apple-system,Segoe UI,sans-serif'; ctx.fillStyle = '#111'; ctx.textBaseline = 'middle'
+    chart.getDatasetMeta(0).data.forEach((bar,i)=>{
+      const val = ds.data[i]; const txt = fmt(val)
+      const neg = val < 0
+      ctx.textAlign = neg ? 'right' : 'left'
+      ctx.fillText(txt, bar.x + (neg?-6:6), bar.y)
+    })
+    ctx.restore()
+  }
+}
+function renderKpiChart(){
+  const el = document.getElementById('cKpis'); if(!el || !window._kpiChartData) return
+  if (charts['cKpis']) { charts['cKpis'].destroy(); delete charts['cKpis'] }
+  const { labels, valores } = window._kpiChartData
+  charts['cKpis'] = new Chart(el.getContext('2d'), {
+    type:'bar',
+    data:{ labels, datasets:[{ data:valores, backgroundColor:valores.map(v=>v>=0?'#0c064b':'#dc2626'), borderRadius:5 }] },
+    options:{ indexAxis:'y', responsive:true, maintainAspectRatio:false,
+      layout:{ padding:{ right:90, left:10 } },
+      plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:ctx=>fmt(ctx.raw) } } },
+      scales:{ x:{ ticks:{ callback:v=>'R$'+(v/1000).toFixed(0)+'k' }, grid:{color:'#f3f4f6'} }, y:{ ticks:{font:{size:12}} } } },
+    plugins:[_kpiLabelPlugin]
+  })
 }
 
 function abrirConfigKpis() {
