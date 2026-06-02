@@ -3405,7 +3405,7 @@ function abrirLancamentoManual(){
   document.getElementById('modalBody').innerHTML = `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group"><label class="form-label">Tipo</label>
-        <select class="form-input" id="lm_tipo"><option value="RECEITA">Receita</option><option value="DESPESA">Despesa</option></select></div>
+        <select class="form-input" id="lm_tipo" onchange="atualizarSituacaoLanc()"><option value="RECEITA">Receita</option><option value="DESPESA">Despesa</option></select></div>
       <div class="form-group"><label class="form-label">Data</label>
         <input class="form-input" id="lm_data" type="date" value="${new Date().toISOString().substring(0,10)}"></div>
     </div>
@@ -3413,7 +3413,7 @@ function abrirLancamentoManual(){
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group"><label class="form-label">Valor (R$)</label><input class="form-input" id="lm_valor" type="number" step="any"></div>
       <div class="form-group"><label class="form-label">Situação</label>
-        <select class="form-input" id="lm_sit"><option value="">—</option><option value="LIQUIDADO">Pago/Recebido</option><option value="PENDENTE">Em aberto</option></select></div>
+        <select class="form-input" id="lm_sit"><option value="">—</option><option value="LIQUIDADO">Pago/Recebido</option><option value="PENDENTE" id="lm_sit_pend">A Receber</option></select></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group"><label class="form-label">Fazenda</label><select class="form-input" id="lm_faz">${optFaz}</select></div>
@@ -3426,6 +3426,12 @@ function abrirLancamentoManual(){
     </div>
     <div id="lm_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
     <button class="btn-primary" style="width:100%" onclick="salvarLancamentoManual()">Salvar lançamento</button>`
+  atualizarSituacaoLanc()
+}
+function atualizarSituacaoLanc(){
+  const tipo = document.getElementById('lm_tipo')?.value
+  const opt = document.getElementById('lm_sit_pend')
+  if (opt) opt.textContent = (tipo==='DESPESA') ? 'A Pagar' : 'A Receber'
 }
 function salvarLancamentoManual(){
   const tipo=document.getElementById('lm_tipo').value
