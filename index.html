@@ -425,12 +425,23 @@ const SINONIMOS = {
   tipo: ['tipo','natureza','d/c','dc','débito/crédito','debito/credito','operação','operacao'],
   cabecas: ['cabeças','cabecas','animais','qtd animais','quantidade animais','nº animais'],
   arrobas: ['arrobas','@','qtd arrobas','quantidade arrobas'],
-  peso: ['peso','kg','peso vivo','peso carcaça','peso carcaca']
+  peso: ['peso','kg','peso vivo','peso carcaça','peso carcaca'],
+  situacao: ['situação','situacao','status','pago','baixado','liquidado','vencimento','quitado','condição','condicao']
 }
 
 const CAMPOS_LABEL = {
   data:'Data', conta:'Conta', descricao:'Descrição', centroCusto:'Centro de Custo',
-  fazenda:'Fazenda', valor:'Valor', tipo:'Tipo (Rec/Desp)', cabecas:'Cabeças', arrobas:'Arrobas', peso:'Peso'
+  fazenda:'Fazenda', valor:'Valor', tipo:'Tipo (Rec/Desp)', cabecas:'Cabeças', arrobas:'Arrobas', peso:'Peso',
+  situacao:'Situação (pago/aberto)'
+}
+
+// Interpreta o texto da coluna situação: retorna 'LIQUIDADO' (pago) ou 'PENDENTE' (a receber/pagar)
+function interpretarSituacao(v){
+  const s = String(v||'').toLowerCase().trim()
+  if (!s) return null
+  if (/(pag|liquid|recebid|quitad|baixad|conclu|ok|sim|true)/.test(s)) return 'LIQUIDADO'
+  if (/(aberto|pendente|a receber|a pagar|em aberto|nao|não|vencid|atras|previst|aguard)/.test(s)) return 'PENDENTE'
+  return null
 }
 
 function detectarMapeamento(colunas) {
@@ -1401,6 +1412,7 @@ function confirmarImportacao(totalRows) {
           cabecas: Number(getCol(row,'cabecas'))||null,
           arrobas: Number(getCol(row,'arrobas'))||null,
           peso: Number(getCol(row,'peso'))||null,
+          situacao: interpretarSituacao(getCol(row,'situacao')),
         })
       }
 
@@ -1473,6 +1485,13 @@ function calcular(lancamentos) {
   const totalCabecas = lancamentos.reduce((s,l)=>s+(l.cabecas||0),0)
   const totalArrobas = lancamentos.reduce((s,l)=>s+(l.arrobas||0),0)
 
+  // Contas a receber / a pagar (lançamentos com situação PENDENTE)
+  const temSituacao = lancamentos.some(l=>l.situacao)
+  const aReceber = lancamentos.filter(l=>l.tipo==='RECEITA' && l.situacao==='PENDENTE').reduce((s,l)=>s+l.valor,0)
+  const aPagar   = lancamentos.filter(l=>l.tipo==='DESPESA' && l.situacao==='PENDENTE').reduce((s,l)=>s+l.valor,0)
+  const recebido = lancamentos.filter(l=>l.tipo==='RECEITA' && l.situacao==='LIQUIDADO').reduce((s,l)=>s+l.valor,0)
+  const pago     = lancamentos.filter(l=>l.tipo==='DESPESA' && l.situacao==='LIQUIDADO').reduce((s,l)=>s+l.valor,0)
+
   const insights = []
   const maioresCustos = Object.entries(porCategoriaDes).sort(([,a],[,b])=>b-a).slice(0,1)
   if (maioresCustos.length) insights.push(`Maior custo: ${maioresCustos[0][0]} (${fmt(maioresCustos[0][1])})`)
@@ -1489,6 +1508,7 @@ function calcular(lancamentos) {
     temPecuaria, totalCabecas, totalArrobas,
     custoPorCabeca: totalCabecas ? despesaTotal/totalCabecas : 0,
     receitaPorArroba: totalArrobas ? receitaTotal/totalArrobas : 0,
+    temSituacao, aReceber, aPagar, recebido, pago,
     insights }
 }
 
@@ -2126,7 +2146,15 @@ function renderModCaixa(c) {
   const saldoFinal = d.receitaTotal - d.despesaTotal
   const mediaMensal = ordenados.length ? saldoFinal/ordenados.length : 0
 
-  c.innerHTML = pageHeader(ICON.caixa,'Fluxo de Caixa','Entradas, saídas, saldo e projeção') +
+  // Contas a receber / a pagar
+  const cardCRP = d.temSituacao ? modCard('Contas a Receber e a Pagar', `<div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">A Receber</div><div class="kpi-value pos">${fmt(d.aReceber)}</div><div class="kpi-sub">recebido: ${fmt(d.recebido)}</div></div>
+      <div class="kpi"><div class="kpi-label">A Pagar</div><div class="kpi-value neg">${fmt(d.aPagar)}</div><div class="kpi-sub">pago: ${fmt(d.pago)}</div></div>
+      <div class="kpi"><div class="kpi-label">Saldo a Realizar</div><div class="kpi-value ${(d.aReceber-d.aPagar)>=0?'pos':'neg'}">${fmt(d.aReceber - d.aPagar)}</div><div class="kpi-sub">a receber − a pagar</div></div>
+    </div>`)
+    : modCard('Contas a Receber e a Pagar', `<p style="font-size:13px;color:#6b7280;line-height:1.6">Para ver contas a receber/pagar, importe uma planilha que tenha uma coluna de <strong>situação</strong> (pago/aberto, liquidado/pendente) e mapeie ela como <strong>"Situação"</strong> na importação.</p>`)
+
+  c.innerHTML = pageHeader(ICON.caixa,'Fluxo de Caixa','Entradas, saídas, saldo, contas a receber/pagar e projeção') +
     `<div class="widget-grid">
       ${modCard('Posição Atual', `<div class="kpi-grid">
         <div class="kpi"><div class="kpi-label">Entradas</div><div class="kpi-value pos">${fmt(d.receitaTotal)}</div></div>
@@ -2134,6 +2162,7 @@ function renderModCaixa(c) {
         <div class="kpi"><div class="kpi-label">Saldo</div><div class="kpi-value ${saldoFinal>=0?'pos':'neg'}">${fmt(saldoFinal)}</div></div>
         <div class="kpi"><div class="kpi-label">Média Mensal</div><div class="kpi-value ${mediaMensal>=0?'pos':'neg'}">${fmt(mediaMensal)}</div></div>
       </div>`)}
+      ${cardCRP}
       ${modCard('Projeção (baseada na média mensal)', `<div class="kpi-grid">
         <div class="kpi"><div class="kpi-label">+30 dias</div><div class="kpi-value ${saldoFinal+mediaMensal>=0?'pos':'neg'}">${fmt(saldoFinal+mediaMensal)}</div></div>
         <div class="kpi"><div class="kpi-label">+60 dias</div><div class="kpi-value ${saldoFinal+mediaMensal*2>=0?'pos':'neg'}">${fmt(saldoFinal+mediaMensal*2)}</div></div>
