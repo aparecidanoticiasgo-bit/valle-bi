@@ -751,10 +751,15 @@ const PERFIS = {
   proprietario: { label:'Proprietário',  mods:['dashboard','dre','custos','pecuario','caixa','mercado','benchmark','consultor'] },
 }
 
+// Permissões extras (não são módulos do menu, são ações)
+const EXTRA_PERMS = [
+  { id:'lancar_manual', label:'Lançar manualmente (receitas/despesas)' },
+]
 function permsDoPerfil(perfil) {
   const p = PERFIS[perfil] || PERFIS.proprietario
-  if (p.mods === '*') return MODULES.map(m=>m.id)
-  return p.mods.slice()
+  let arr = (p.mods === '*') ? MODULES.map(m=>m.id) : p.mods.slice()
+  if (['admin','suporte','gestor'].includes(perfil)) arr.push('lancar_manual')
+  return arr
 }
 
 function usuarioAtual() {
@@ -789,6 +794,15 @@ function buildNav() {
     b.onclick = () => showView(m.id)
     nav.appendChild(b)
   })
+  // botão lançar manual (se tiver permissão)
+  if (typeof podeLancarManual === 'function' && podeLancarManual()) {
+    const lan = document.createElement('button')
+    lan.className = 'btn-secondary'
+    lan.style.cssText = 'padding:8px 14px'
+    lan.textContent = '+ Lançar'
+    lan.onclick = abrirLancamentoManual
+    nav.appendChild(lan)
+  }
   // botão importar
   const imp = document.createElement('button')
   imp.className = 'btn-primary'
@@ -2847,6 +2861,7 @@ function dadosApp(){
 function usuarioAtual(){ return cloudUser }
 function ehAdmin(u){ u=u||cloudUser; return !!u && (u.perfil==='admin' || u.perfil==='suporte') }
 function ehSuporte(u){ u=u||cloudUser; return !!u && u.perfil==='suporte' }
+function podeLancarManual(){ const u=cloudUser; return !!u && (ehAdmin(u) || (u.permissoes||[]).includes('lancar_manual')) }
 
 // override: não carrega do localStorage (carregamento é assíncrono via nuvem)
 function loadState(){}
@@ -3005,6 +3020,10 @@ async function editarPerfilCloud(id){
       <input type="checkbox" class="epperm" value="${m.id}" ${perms.includes(m.id)?'checked':''}>
       <span style="display:inline-flex;align-items:center;gap:6px">${m.icon}${m.label}</span>
     </label>`).join('')
+  const checksExtra = EXTRA_PERMS.map(e=>`
+    <label style="display:flex;align-items:center;gap:8px;padding:5px 0;font-size:13px;color:#0c064b;font-weight:600">
+      <input type="checkbox" class="epperm" value="${e.id}" ${perms.includes(e.id)?'checked':''}> ${e.label}
+    </label>`).join('')
   document.getElementById('modalTitle').textContent='Editar Usuário'
   document.getElementById('modalOverlay').classList.remove('hidden')
   document.getElementById('modalBody').innerHTML = `
@@ -3013,7 +3032,11 @@ async function editarPerfilCloud(id){
       <select class="form-input" id="ep_papel" onchange="aplicarPermsPerfilCloud()">${opc}</select></div>
     <div class="form-group">
       <label class="form-label">Permissões de módulos</label>
-      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;max-height:220px;overflow:auto">${checks}</div>
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px;max-height:200px;overflow:auto">${checks}</div>
+    </div>
+    <div class="form-group">
+      <label class="form-label">Permissões de ações</label>
+      <div style="border:1px solid #e5e7eb;border-radius:8px;padding:8px 12px">${checksExtra}</div>
     </div>
     <label style="display:flex;align-items:center;gap:8px;font-size:13px;margin-bottom:12px"><input type="checkbox" id="ep_ativo" ${p.ativo!==false?'checked':''}> Usuário ativo</label>
     <p style="font-size:12px;color:#9ca3af">Para trocar a senha, o usuário usa "Esqueci minha senha" ou o Suporte redefine.</p>
@@ -3260,6 +3283,71 @@ async function salvarCotacao(){
     if(error) throw error
     closeModal(); showView('mercado')
   } catch(e){ erro.textContent='Erro: '+(e.message||e) }
+}
+
+// ============================================================
+// LANÇAMENTO MANUAL (receita/despesa avulsa)
+// ============================================================
+function abrirLancamentoManual(){
+  if(!podeLancarManual()){ alert('Você não tem permissão para lançar manualmente.'); return }
+  const fazendas = [...new Set((state.entidades||[]).map(e=>e.nome).concat((state.lancamentos||[]).map(l=>l.fazenda)).filter(f=>f&&f.trim()))]
+  const optFaz = ['<option value="">— sem fazenda —</option>'].concat(fazendas.map(f=>`<option>${f}</option>`)).join('')
+  document.getElementById('modalTitle').textContent='Lançamento Manual'
+  document.getElementById('modalOverlay').classList.remove('hidden')
+  document.getElementById('modalBody').innerHTML = `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Tipo</label>
+        <select class="form-input" id="lm_tipo"><option value="RECEITA">Receita</option><option value="DESPESA">Despesa</option></select></div>
+      <div class="form-group"><label class="form-label">Data</label>
+        <input class="form-input" id="lm_data" type="date" value="${new Date().toISOString().substring(0,10)}"></div>
+    </div>
+    <div class="form-group"><label class="form-label">Descrição / Histórico</label><input class="form-input" id="lm_desc" placeholder="Ex: Venda de bois, Compra de ração..."></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Valor (R$)</label><input class="form-input" id="lm_valor" type="number" step="any"></div>
+      <div class="form-group"><label class="form-label">Situação</label>
+        <select class="form-input" id="lm_sit"><option value="">—</option><option value="LIQUIDADO">Pago/Recebido</option><option value="PENDENTE">Em aberto</option></select></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Fazenda</label><select class="form-input" id="lm_faz">${optFaz}</select></div>
+      <div class="form-group"><label class="form-label">Centro de Custo</label><input class="form-input" id="lm_cc" placeholder="Opcional"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Conta</label><input class="form-input" id="lm_conta" placeholder="Opcional"></div>
+      <div class="form-group"><label class="form-label">Cabeças</label><input class="form-input" id="lm_cab" type="number" step="any" placeholder="Opcional"></div>
+      <div class="form-group"><label class="form-label">Arrobas</label><input class="form-input" id="lm_arr" type="number" step="any" placeholder="Opcional"></div>
+    </div>
+    <div id="lm_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
+    <button class="btn-primary" style="width:100%" onclick="salvarLancamentoManual()">Salvar lançamento</button>`
+}
+function salvarLancamentoManual(){
+  const tipo=document.getElementById('lm_tipo').value
+  const data=document.getElementById('lm_data').value || null
+  const desc=document.getElementById('lm_desc').value.trim()
+  const valor=parseFloat(document.getElementById('lm_valor').value)
+  const sit=document.getElementById('lm_sit').value || null
+  const faz=document.getElementById('lm_faz').value
+  const cc=document.getElementById('lm_cc').value.trim()
+  const conta=document.getElementById('lm_conta').value.trim()
+  const cab=parseFloat(document.getElementById('lm_cab').value)
+  const arr=parseFloat(document.getElementById('lm_arr').value)
+  const erro=document.getElementById('lm_erro')
+  if(isNaN(valor)||valor<=0){ erro.textContent='Informe um valor válido.'; return }
+  if(!desc){ erro.textContent='Informe a descrição.'; return }
+  state.lancamentos.push({
+    id:'l_'+Math.random().toString(36).slice(2),
+    importacaoId:'manual',
+    data, conta, descricao:desc, centroCusto:cc, fazenda:faz,
+    valor:Math.abs(valor), tipo, categoria:classificarCategoria(desc,tipo),
+    cabecas:isNaN(cab)?null:cab, arrobas:isNaN(arr)?null:arr, peso:null,
+    situacao:sit, origem:'manual'
+  })
+  if(!state.importacoes.some(i=>i.id==='manual')){
+    state.importacoes.push({ id:'manual', nome:'Lançamentos manuais', periodo:null, data:new Date().toISOString() })
+  }
+  saveState()
+  filteredLancamentos=[...state.lancamentos]
+  closeModal()
+  renderAll()
 }
 
 // ============================================================
