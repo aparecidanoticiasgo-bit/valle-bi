@@ -3026,6 +3026,107 @@ async function salvarTrocaSenha(){
 }
 
 // ============================================================
+// MÓDULO MERCADO (cotações na nuvem)
+// ============================================================
+const PRODUTOS_COT = [
+  { id:'boi_gordo',   rotulo:'Boi Gordo',    unidade:'@' },
+  { id:'vaca_gorda',  rotulo:'Vaca Gorda',   unidade:'@' },
+  { id:'bezerro',     rotulo:'Bezerro',      unidade:'cab' },
+  { id:'garrote',     rotulo:'Garrote',      unidade:'cab' },
+  { id:'novilha',     rotulo:'Novilha',      unidade:'cab' },
+  { id:'milho',       rotulo:'Milho',        unidade:'sc' },
+  { id:'soja',        rotulo:'Soja',         unidade:'sc' },
+  { id:'farelo_soja', rotulo:'Farelo de Soja', unidade:'t' },
+  { id:'diesel',      rotulo:'Diesel',       unidade:'L' },
+]
+
+async function renderModMercado(c){
+  c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias e valor do rebanho') +
+    '<p style="color:#9ca3af;font-size:13px">Carregando cotações...</p>'
+  let rows = []
+  try { const { data } = await sb.from('cotacoes').select('*').order('data',{ascending:false}).limit(500); rows = data||[] } catch(e){}
+
+  // última e penúltima cotação por produto (estado BR ou primeiro disponível)
+  const cards = PRODUTOS_COT.map(p=>{
+    const hist = rows.filter(r=>r.produto===p.id).sort((a,b)=> (a.data<b.data?1:-1))
+    const atual = hist[0]
+    const ant = hist.find(r=> r.data < (atual?atual.data:''))
+    let varHtml = ''
+    if (atual && ant && ant.valor){
+      const d = atual.valor - ant.valor
+      const pct = (d/ant.valor*100)
+      varHtml = `<div class="kpi-sub" style="color:${d>=0?'#16a34a':'#dc2626'}">${d>=0?'▲':'▼'} ${Math.abs(pct).toFixed(1)}% vs ${fmtDataCot(ant.data)}</div>`
+    }
+    return `<div class="kpi">
+      <div class="kpi-label">${p.rotulo}${atual&&atual.estado&&atual.estado!=='BR'?' ('+atual.estado+')':''}</div>
+      <div class="kpi-value">${atual?fmt(atual.valor):'—'}<span style="font-size:11px;color:#9ca3af"> /${p.unidade}</span></div>
+      ${varHtml}
+      ${atual?`<div class="kpi-sub">${fmtDataCot(atual.data)}${atual.fonte?' · '+atual.fonte:''}</div>`:'<div class="kpi-sub">sem cotação</div>'}
+    </div>`
+  }).join('')
+
+  // valor de mercado do rebanho (boi gordo @ × arrobas do cliente)
+  const d = dadosAtuais()
+  const boi = rows.filter(r=>r.produto==='boi_gordo').sort((a,b)=>(a.data<b.data?1:-1))[0]
+  const valorRebanho = (boi && d.totalArrobas) ? boi.valor * d.totalArrobas : 0
+  const rebanhoCard = modCard('Valor de Mercado do Rebanho', `
+    <div class="kpi-grid">
+      <div class="kpi"><div class="kpi-label">Arrobas (rebanho)</div><div class="kpi-value blue">${fmtNum(d.totalArrobas)}</div></div>
+      <div class="kpi"><div class="kpi-label">@ Boi Gordo</div><div class="kpi-value">${boi?fmt(boi.valor):'—'}</div></div>
+      <div class="kpi"><div class="kpi-label">Valor do Rebanho</div><div class="kpi-value pos">${valorRebanho?fmt(valorRebanho):'—'}</div></div>
+    </div>
+    ${!boi?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Cadastre a cotação do Boi Gordo para calcular.</p>':''}
+    ${!d.totalArrobas?'<p style="font-size:12px;color:#9ca3af;margin-top:8px">Importe planilha com arrobas para calcular o valor do rebanho.</p>':''}
+  `)
+
+  const botaoAdd = ehAdmin() ? `<div style="margin-bottom:14px"><button class="btn-primary" onclick="novaCotacao()">+ Lançar cotação</button>
+    <span style="font-size:12px;color:#9ca3af;margin-left:10px">Atualização automática (CEPEA) entra via Edge Function — configuração à parte.</span></div>` : ''
+
+  c.innerHTML = pageHeader(ICON.mercado,'Inteligência de Mercado','Cotações agropecuárias e valor do rebanho') +
+    botaoAdd +
+    `<div class="widget-grid">
+      ${modCard('Cotações atuais', `<div class="kpi-grid">${cards}</div>`)}
+      ${rebanhoCard}
+    </div>`
+}
+function fmtDataCot(d){ if(!d) return ''; const [y,m,dia]=d.split('-'); return `${dia}/${m}/${y.slice(2)}` }
+
+function novaCotacao(){
+  const opc = PRODUTOS_COT.map(p=>`<option value="${p.id}" data-un="${p.unidade}">${p.rotulo} (${p.unidade})</option>`).join('')
+  document.getElementById('modalTitle').textContent='Lançar Cotação'
+  document.getElementById('modalOverlay').classList.remove('hidden')
+  document.getElementById('modalBody').innerHTML = `
+    <div class="form-group"><label class="form-label">Produto</label><select class="form-input" id="co_prod">${opc}</select></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Estado (UF ou BR)</label><input class="form-input" id="co_uf" value="BR" maxlength="2" style="text-transform:uppercase"></div>
+      <div class="form-group"><label class="form-label">Data</label><input class="form-input" id="co_data" type="date" value="${new Date().toISOString().substring(0,10)}"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label class="form-label">Valor (R$)</label><input class="form-input" id="co_valor" type="number" step="any"></div>
+      <div class="form-group"><label class="form-label">Fonte (opcional)</label><input class="form-input" id="co_fonte" placeholder="CEPEA, Scot..."></div>
+    </div>
+    <div id="co_erro" style="color:#dc2626;font-size:12px;min-height:16px"></div>
+    <button class="btn-primary" style="width:100%" onclick="salvarCotacao()">Salvar cotação</button>`
+}
+async function salvarCotacao(){
+  const sel = document.getElementById('co_prod')
+  const produto = sel.value
+  const rotulo = PRODUTOS_COT.find(p=>p.id===produto)?.rotulo
+  const unidade = sel.options[sel.selectedIndex].getAttribute('data-un')
+  const estado = (document.getElementById('co_uf').value||'BR').toUpperCase().trim()
+  const data = document.getElementById('co_data').value
+  const valor = parseFloat(document.getElementById('co_valor').value)
+  const fonte = document.getElementById('co_fonte').value.trim() || 'Manual'
+  const erro = document.getElementById('co_erro')
+  if(isNaN(valor)||valor<=0){ erro.textContent='Informe um valor válido.'; return }
+  try {
+    const { error } = await sb.from('cotacoes').upsert({ produto, rotulo, estado, unidade, valor, data, fonte }, { onConflict:'produto,estado,data' })
+    if(error) throw error
+    closeModal(); showView('mercado')
+  } catch(e){ erro.textContent='Erro: '+(e.message||e) }
+}
+
+// ============================================================
 // INIT (nuvem)
 // ============================================================
 async function bootCloud(){
